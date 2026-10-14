@@ -1,0 +1,28 @@
+# Only the 4x simulation dataset is distributed with this project.
+/data_sim_*.in
+!/data_sim_4x.in
+/data_sim.in
+
+# Local builds, simulation outputs, and transfer archives.
+/build/
+/runs/
+/lammps26/build*/
+/lammps26/pid
+/lammps/Obj_*/
+/lammps/_backup*/
+/lammps/lmp_*
+/lammps/dump.*
+/lammps/log.*
+/lammps/com.dat
+/lammps/Makefile.package
+/lammps/Makefile.package.settings
+/lammps_modified.zip
+/palmetto-source.tar.gz
+/palmetto-smoke-*.out
+/palmetto-smoke-*.err
+*.o
+*.a
+*.so
+*.pyc
+__pycache__/
+.DS_Store

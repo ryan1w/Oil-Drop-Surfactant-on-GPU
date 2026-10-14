@@ -1,0 +1,118 @@
+Palmetto: build and first cluster run
+===================================
+
+Start with one A100 and the 4x data. smoke.sbatch builds this project's custom
+LAMMPS and runs 5500 steps of in.prod26. It requests one GPU, one MPI rank,
+six CPU cores, 32 GB RAM and two hours (including compilation). Resource
+requests are starting estimates, not measurements on Palmetto.
+
+1. Clone the source and 4x data
+-----------------------------
+
+On Palmetto, choose a shared project directory visible from compute nodes:
+
+    git clone https://github.com/ryan1w/Oil-Drop-Surfactant-on-GPU.git
+    cd Oil-Drop-Surfactant-on-GPU
+
+The repository includes the custom lammps26 source as ordinary files and the
+4x dataset. It includes the GPU random-stream fix from engine commit
+d12504677f. No submodule initialization is required. The scripts hash the
+actual source files, build environment, executable, input and data for
+provenance. The 8x and 16x project datasets are excluded from Git.
+
+2. Confirm the module names
+---------------------------
+
+The initial defaults in env.sh follow Clemson's module documentation:
+gcc/12.3.0, cuda/12.3.0, then the CUDA-aware openmpi/5.0.1. Check availability:
+
+    module spider gcc/12.3.0
+    module spider cuda/12.3.0
+    module spider openmpi/5.0.1
+    module spider cmake
+
+This checkout bundles Kokkos requiring CMake >=3.22, C++20 and CUDA >=12.2.
+Use a CUDA 12.x toolkit so the same toolchain supports all three GPU targets.
+CUDA 13 removed V100 compilation support. Clemson's general LAMMPS example
+uses an older LAMMPS and CUDA 11.8; that CUDA version cannot build this checkout.
+
+If a CMake module is needed, set PALMETTO_CMAKE_MODULE to its installed name
+and version before submitting. Other overrides are PALMETTO_GCC_MODULE,
+PALMETTO_CUDA_MODULE and PALMETTO_MPI_MODULE. These environment variables are
+inherited by sbatch under its default export behavior. The scripts reload the
+same module choices when building and running. A changed toolchain requires a
+new PALMETTO_BUILD_ROOT to avoid reusing incompatible CMake caches.
+
+3. Submit the A100 build and smoke job
+------------------------------------
+
+From the transferred project root on Palmetto:
+
+    sbatch cluster/palmetto/smoke.sbatch a100
+
+If your allocation needs an account, partition or QoS, pass those site/account
+values on this command. They are intentionally not guessed in the script.
+The Slurm output files are palmetto-smoke-JOBID.out and .err in this directory.
+Build files go under build/palmetto/a100; run outputs go under
+runs/palmetto/smoke_a100_4x_JOBID. Each attempt has a separate directory and
+LAMMPS failures propagate to Slurm's exit status.
+
+After the job, substitute its numeric ID:
+
+    sacct -j JOBID --format=JobID,State,ExitCode,Elapsed,MaxRSS
+
+Check for SMOKE PASSED, inspect log.lammps for warnings, and review the fluid
+temperature and sphere gap. The target temperature is 0.05 and initial gap is
+9 in reduced units; transient fluctuations are expected. The short equilibration
+is for deployment validation and must not be used for production measurements.
+Expected files: log.lammps, screen.out, com.dat, restart.equil, restart.drive,
+provenance.txt and checksum/build-environment records.
+
+4. Repeat for other GPUs, then plan production
+---------------------------------------------
+
+Each GPU type has a separate build directory and Kokkos target:
+
+    Slurm type    Kokkos target    Build directory
+    v100          VOLTA70          build/palmetto/v100
+    a100          AMPERE80         build/palmetto/a100
+    h100          HOPPER90         build/palmetto/h100
+
+    sbatch --gpus=v100:1 cluster/palmetto/smoke.sbatch v100
+    sbatch --gpus=h100:1 cluster/palmetto/smoke.sbatch h100
+
+The GPU flag and positional argument must match. Submit one build job per
+GPU type at a time. Later invocations rebuild incrementally. Build alone in
+an interactive Slurm allocation with bash cluster/palmetto/build.sh a100.
+
+PALMETTO_PROJECT overrides the project root; PALMETTO_BUILD_ROOT overrides
+the build location; PALMETTO_RUN_ROOT selects a shared output location.
+PALMETTO_BOX can select 8x or 16x once that data file has also been transferred.
+
+Once compatibility passes, run CPU/GPU statistical comparisons and a longer
+pilot with the full production equilibration. Measure steps/second, memory
+and queue delays on the available GPU types. Use one replica per GPU array
+task for the first production campaign. Add periodic checkpoints and a
+continuation input before jobs that might reach the wall-time limit: the
+current production input saves only after equilibration and after the drive,
+and this smoke script does not automatically resume interrupted runs.
+
+Local validation of these scripts does not establish cluster compatibility,
+scientific convergence or performance. Actual Palmetto execution is required.
+
+Sources checked 2026-10-14
+--------------------------
+
+Clemson Slurm GPU names and resource requests:
+https://docs.rcd.clemson.edu/palmetto/job_management/submit/
+Clemson module examples and CUDA-aware OpenMPI:
+https://docs.rcd.clemson.edu/software/modules/
+Clemson custom LAMMPS build guidance:
+https://docs.rcd.clemson.edu/software/applications/molecular_dynamics/lammps/
+NVIDIA CUDA 13 architecture support changes:
+https://docs.nvidia.com/cuda/archive/13.1.2/cuda-toolkit-release-notes/index.html
+Local requirements and architecture mappings:
+lammps26/lib/kokkos/CMakeLists.txt
+lammps26/lib/kokkos/cmake/kokkos_compiler_id.cmake
+lammps26/lib/kokkos/cmake/kokkos_arch.cmake
+lammps26/cmake/Modules/Packages/KOKKOS.cmake

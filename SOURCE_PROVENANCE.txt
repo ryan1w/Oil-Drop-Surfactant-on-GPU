@@ -1,0 +1,13 @@
+Project source snapshot for Oil-Drop-Surfactant-on-GPU
+Prepared (UTC): 2026-10-14T20:43:25.784363+00:00
+Modern engine version: LAMMPS 4 Jul 2026 Development
+Imported modern engine commit: d12504677f6bb40e01ecaa1c253fc1c6cf6e41f6
+Modern engine working tree status: clean
+Modern engine tracked files copied: 14951
+Legacy reference source files copied: 3346
+The engine is vendored as ordinary files; its original Git history is not included.
+Legacy reference: modified LAMMPS 12 Dec 2018 source directory.
+Local builds, logs, trajectories, backups and source ZIP archives are excluded.
+Project dataset included: data_sim_4x.in (288442 atoms)
+data_sim_4x.in SHA256: 0aa254d75add514b019c983164bffddc2ebaffb3ee8a69164404e7607100267f
+Project datasets excluded: data_sim_8x.in, data_sim_16x.in

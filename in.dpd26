@@ -1,0 +1,217 @@
+# in.dpd26: in.dpd for LAMMPS develop 2026 (lammps26).  The ONLY changes:
+#   neighbor ${skin} bin (was multi), comm_modify vel yes (the three
+#   'comm_modify mode multi cutoff/multi' lines removed); 'neighbor multi'
+#   and 'comm_modify mode multi' are errors in lammps26 and all cutoffs are 1.0.
+# Every physical parameter, seed and run segment is unchanged.
+# GPU note: pair dpd/diffcut/kk keeps one random stream across runs, like
+#   the CPU style (fixed in lammps26 commit d12504677f; it used to restart the
+#   stream at every 'run').  For repeatable, independent replicas with fixed
+#   seeds, see in.prod26.
+########################################################################
+########################################################################
+########################################################################
+#### An input script file for                                        ###
+#### DPD simulation of two oil droplets with surfactants             ###
+#### suspended in water                                              ###
+####                                                                 ### 
+#### Created  : Zhen Li (zhen_li@brown.edu)                          ### 
+####            Division of Applied Mathematics, Brown University.   ###
+####                                                                 ###
+#### Date : Apr. 13, 2018     	                                     ###
+########################################################################
+########################################################################
+########################################################################
+
+#**********************************************************************
+##**********************************************************************
+## Define all the variables
+## ndim                     : dimension of the system
+## kBT                      : normalized temperature
+## seed                     : seed for random number generator
+## rc                       : cutoff radius
+## skin                     : surround skin for neighbor list
+##
+## a                        : coefficient for conservative force
+## gamma                    : friction coefficient
+##
+## relax                    : timestep for relax the system
+## ntime                    : total number of timestep for the simulation
+## dt                       : timestep
+## thermo                   : frequency for screen print
+## dump                     : timestep for write_out
+##**********************************************************************
+
+variable  ndim		    equal 3
+variable  nden          equal 4.0
+variable  kBT       	equal 0.05
+variable  seed      	equal 123456
+variable  rc        	equal 1.0
+variable  skin      	equal 0.3*${rc}
+variable  a_ff          equal 75.0*${kBT}/${nden}
+variable  s_exp     	equal 2.0
+variable  sigma     	equal 3.4
+variable  gamma     	equal ${sigma}^2/(2*${kBT})
+
+variable  a_fp_nominal  equal 130.0*${kBT}/${nden}
+variable  a_fp 		    equal ${a_fp_nominal}/27.0
+
+variable gamma_fp 	equal ${gamma}/27.0
+
+variable R  		equal 1.0
+variable h  		equal 9.0
+variable z0 		equal ${R}+${h}
+variable H  		equal 4.0*${z0}
+
+
+
+####### modif diffcut #########
+
+variable  cut_global    equal 1.0
+variable  cut_C         equal 1.0
+variable  cut_D         equal 1.0
+
+variable  ntime     	equal 1000
+
+#variable  dump          equal 1000
+
+##**********************************************************************
+## End of the definition of variables
+##**********************************************************************428344
+
+##**********************************************************************
+## Start of defining the particle system
+##**********************************************************************
+
+units           lj
+dimension       ${ndim}
+boundary        p p p
+neighbor        ${skin} bin
+neigh_modify    every 1 delay 0 check yes
+
+##**********************************************************************
+## Use the atom_style: angle
+##**********************************************************************
+
+atom_style      angle
+read_data       data_sim.in
+comm_modify 	vel yes
+
+##**********************************************************************
+## Restart 
+##**********************************************************************
+
+#read_restart       file.restart.2000
+#variable restart_freq   equal   round(${ntime}/2)
+#restart    ${restart_freq}    file.restart
+
+####### modif different cutoff #########
+
+pair_style  dpd/diffcut     ${kBT}  ${cut_global} ${seed} 
+
+##**********************************************************************
+## Define the coefficients for pair-wise interactions
+## dpd coefficient requires 5 parameters :
+## itype jtype a0 gamma cut_ij
+##**********************************************************************
+                   
+pair_coeff      1 1 ${a_ff} ${gamma} ${s_exp} ${cut_C} ${cut_D}  
+pair_coeff      1 2 ${a_fp} ${gamma_fp} ${s_exp} ${cut_C} ${cut_D}
+pair_coeff      2 2 0.0 0.0 ${s_exp} ${cut_C} ${cut_D}
+pair_coeff 	1 3 ${a_ff} ${gamma} ${s_exp} ${cut_C} ${cut_D}
+pair_coeff      2 3 ${a_fp} ${gamma_fp} ${s_exp} ${cut_C} ${cut_D}
+pair_coeff      3 3 0.0 0.0 ${s_exp} ${cut_C} ${cut_D}
+
+##----------------------------------------------------------------------
+## Define groups
+##----------------------------------------------------------------------
+
+group		fluid  	  type 1
+group 		particle  type 2
+group 		wall	  type 3
+
+##----------------------------------------------------------------------
+## initial the velocity of the particles
+##----------------------------------------------------------------------
+
+velocity       fluid create ${kBT} ${seed} loop local dist gaussian
+velocity       particle create ${kBT} ${seed} loop local dist gaussian      
+velocity       wall set 0.0 0.0 0.0
+
+##---------------------------------------------------------------------------------------
+## Integration of particles' position, velocity. Fix the particle distance from the wall
+##--------------------------------------------------------------------------------------------
+
+fix 		integrate fluid nve
+
+variable 	kz equal 500.0
+fix 		height particle spring tether ${kz} NULL NULL ${z0} 0.0
+
+fix             rigid particle rigid/nve/small molecule
+neigh_modify    exclude molecule/intra particle
+
+fix 		boundary_p fluid fluid/particle/treatment rigid ${R} 0.05 ${kBT} -123456
+fix 		boundary_w fluid fluid/wall/treatment wall 0.0 ${H} 0.05 ${kBT} -654321
+##----------------------------------------------------------------------
+## thermodynamics and checks
+##----------------------------------------------------------------------
+
+compute         tempMV2_p particle temp
+compute_modify  tempMV2_p extra/dof 0
+
+compute         tempMV2_f fluid temp
+
+compute         com  particle  com
+variable 	gap equal c_com[3]-v_R
+
+thermo_style    custom step c_tempMV2_p c_tempMV2_f v_gap f_boundary_p[17] f_boundary_p[18] f_boundary_p[16] f_boundary_w[16] f_boundary_w[17] f_boundary_w[18] f_boundary_w[19]
+
+thermo_modify   flush yes
+thermo          100
+
+##----------------------------------------------------------------------
+## relax the initial configuration of the system
+##----------------------------------------------------------------------
+
+timestep       0.001
+run            1000
+
+timestep       0.005
+run 	       5000
+unfix	       boundary_p
+unfix	       boundary_w
+reset_timestep 0
+
+fix            boundary_p fluid fluid/particle/treatment rigid ${R} 0.05 ${kBT} -123456
+fix            boundary_w fluid fluid/wall/treatment wall 0.0 ${H} 0.05 ${kBT} -654324
+
+##----------------------------------------------------------------------
+## Fix the particle distance from the wall and drive it in x-directio
+##----------------------------------------------------------------------
+
+variable 	Ftotal equal 2.5      
+variable 	Fbead equal v_Ftotal/459
+
+fix 		drive particle addforce v_Fbead 0.0 0.0
+
+##----------------------------------------------------------------------
+## COM calculation for all polymer beads
+##----------------------------------------------------------------------
+
+fix 	       fcomm particle print 1 "$(c_com[1])  $(c_com[2])  $(c_com[3])" file com.dat screen no
+
+#----------------------------------------------------------------------
+## Output and dump simulation data
+##----------------------------------------------------------------------
+#dump 1  polymer custom  ${dump} fluid.lammpstrj id mol type element x y z
+#dump_modify 1 element HEAD TAIL WATER
+#dump_modify 1 sort id
+#----------------------------------------------------------------------
+## Run simulation 
+##----------------------------------------------------------------------
+thermo		10000
+run            ${ntime}
+########################################################################
+###
+### Input file Ends !
+### 
+########################################################################

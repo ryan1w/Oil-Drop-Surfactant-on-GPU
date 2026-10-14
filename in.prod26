@@ -1,0 +1,130 @@
+# in.prod26: production run of the driven sphere for LAMMPS develop 2026
+# (lammps26, CPU or GPU).  Same physics and fixes as in.dpd / in.dpd26.
+# Differences:
+#   - fixed, distinct positive seeds derived from the replica number 'rep'
+#     (pair noise, velocities, sphere fix, wall fix): runs are repeatable and
+#     replicas independent
+#   - time-step schedule: ${ndt1} steps at dt=0.001, then a ramp through the
+#     time steps in 'dtramp' (${nramp} steps each), then dt=0.005; this avoids
+#     the bead speed spikes after an abrupt 0.001 -> 0.005 switch
+#   - equilibration of ${neq} steps at dt=0.005 before the drive (default
+#     14000 = 70 time units; the near-wall layers settle with tau ~ 10)
+#   - one instance of each treatment fix for the whole run (no unfix /
+#     reset_timestep), so no random stream is replayed
+#   - a drive of ${ndrive} steps; com.dat holds the unwrapped sphere COM
+#     (x y z) every ${ncom} steps; its header line gives the step of the
+#     first row (rows printing $(step) would copy all atoms to the host)
+#   - restart files after the equilibration and at the end
+# usage (GPU, one process; see run_prod.sh):
+#   lmp -k on g 1 -sf kk -pk kokkos neigh half newton on comm device \
+#       -in in.prod26 -var rep 1 [-var neq N -var ndrive N -var ncom N]
+# data_sim.in must point to data_sim_4x.in, data_sim_8x.in or data_sim_16x.in.
+
+variable  rep           index 1
+variable  ndt1          index 1000
+variable  nramp         index 500
+variable  neq           index 14000
+variable  ndrive        index 300000
+variable  ncom          index 10
+variable  nthermo       index 1000
+
+variable  pseed         equal 1000003+100*${rep}
+variable  vseed         equal 2000003+100*${rep}
+variable  sseed         equal 3000003+100*${rep}
+variable  wseed         equal 4000003+100*${rep}
+
+variable  ndim          equal 3
+variable  nden          equal 4.0
+variable  kBT           equal 0.05
+variable  rc            equal 1.0
+variable  skin          equal 0.3*${rc}
+variable  a_ff          equal 75.0*${kBT}/${nden}
+variable  s_exp         equal 2.0
+variable  sigma         equal 3.4
+variable  gamma         equal ${sigma}^2/(2*${kBT})
+variable  a_fp_nominal  equal 130.0*${kBT}/${nden}
+variable  a_fp          equal ${a_fp_nominal}/27.0
+variable  gamma_fp      equal ${gamma}/27.0
+variable  R             equal 1.0
+variable  h             equal 9.0
+variable  z0            equal ${R}+${h}
+variable  H             equal 4.0*${z0}
+variable  cut_global    equal 1.0
+variable  cut_C         equal 1.0
+variable  cut_D         equal 1.0
+
+units           lj
+dimension       ${ndim}
+boundary        p p p
+neighbor        ${skin} bin
+neigh_modify    every 1 delay 0 check yes
+
+atom_style      angle
+read_data       data_sim.in
+comm_modify     vel yes
+
+pair_style      dpd/diffcut ${kBT} ${cut_global} ${pseed}
+pair_coeff      1 1 ${a_ff} ${gamma} ${s_exp} ${cut_C} ${cut_D}
+pair_coeff      1 2 ${a_fp} ${gamma_fp} ${s_exp} ${cut_C} ${cut_D}
+pair_coeff      2 2 0.0 0.0 ${s_exp} ${cut_C} ${cut_D}
+pair_coeff      1 3 ${a_ff} ${gamma} ${s_exp} ${cut_C} ${cut_D}
+pair_coeff      2 3 ${a_fp} ${gamma_fp} ${s_exp} ${cut_C} ${cut_D}
+pair_coeff      3 3 0.0 0.0 ${s_exp} ${cut_C} ${cut_D}
+
+group           fluid     type 1
+group           particle  type 2
+group           wall      type 3
+
+velocity        fluid create ${kBT} ${vseed} loop local dist gaussian
+velocity        particle create ${kBT} ${vseed} loop local dist gaussian
+velocity        wall set 0.0 0.0 0.0
+
+fix             integrate fluid nve
+variable        kz equal 500.0
+fix             height particle spring tether ${kz} NULL NULL ${z0} 0.0
+fix             rigid particle rigid/nve/small molecule
+neigh_modify    exclude molecule/intra particle
+
+fix             boundary_p fluid fluid/particle/treatment rigid ${R} 0.05 ${kBT} ${sseed}
+fix             boundary_w fluid fluid/wall/treatment wall 0.0 ${H} 0.05 ${kBT} ${wseed}
+
+compute         tempMV2_p particle temp
+compute_modify  tempMV2_p extra/dof 0
+compute         tempMV2_f fluid temp
+compute         com particle com
+variable        gap equal c_com[3]-v_R
+
+thermo_style    custom step dt c_tempMV2_p c_tempMV2_f c_com[1] v_gap &
+                f_boundary_p[1] f_boundary_p[2] f_boundary_p[16] f_boundary_p[17] f_boundary_p[18] &
+                f_boundary_w[1] f_boundary_w[2] f_boundary_w[3] f_boundary_w[4] &
+                f_boundary_w[16] f_boundary_w[17] f_boundary_w[18] f_boundary_w[19]
+thermo_modify   flush yes
+thermo          ${nthermo}
+
+# ---- equilibration: dt=0.001, ramp, dt=0.005 ----
+
+timestep        0.001
+run             ${ndt1}
+
+variable        dtramp index 0.002 0.003 0.004
+label           ramp
+timestep        ${dtramp}
+run             ${nramp}
+next            dtramp
+jump            SELF ramp
+
+timestep        0.005
+run             ${neq}
+write_restart   restart.equil
+
+# ---- drive: total force 2.5 on the sphere along x ----
+
+variable        Ftotal equal 2.5
+variable        Fbead equal v_Ftotal/459
+fix             drive particle addforce v_Fbead 0.0 0.0
+
+print           "# unwrapped sphere COM x y z every ${ncom} steps, dt 0.005, total force ${Ftotal}; first row = step $(step)" file com.dat screen no
+fix             fcomm particle print ${ncom} "$(c_com[1]) $(c_com[2]) $(c_com[3])" append com.dat screen no
+
+run             ${ndrive}
+write_restart   restart.drive
