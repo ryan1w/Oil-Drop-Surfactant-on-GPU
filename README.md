@@ -7,36 +7,20 @@ input headers retain the original oil-droplet/surfactant description.
 
 ## Run on Clemson Palmetto
 
-Clone into a shared directory that is visible from compute nodes:
-
 ```bash
 git clone https://github.com/ryan1w/Oil-Drop-Surfactant-on-GPU.git
 cd Oil-Drop-Surfactant-on-GPU
+# copy data_sim_8x.in and data_sim_16x.in here first (not in Git), then:
+sbatch cluster/palmetto/run.sbatch 4x
+sbatch cluster/palmetto/run.sbatch 8x
+sbatch cluster/palmetto/run.sbatch 16x
 ```
 
-Follow [the Palmetto setup instructions](cluster/palmetto/README) to confirm
-the available compiler, CUDA, MPI, and CMake modules. Then submit an A100
-build and short validation run:
-
-```bash
-sbatch cluster/palmetto/smoke.sbatch a100
-```
-
-The job builds the bundled custom engine and runs 5,500 steps on the 4x
-system. It requests one GPU, one MPI rank, six CPU cores, 32 GB RAM, and two
-hours including compilation. Check `palmetto-smoke-JOBID.out` for
-`SMOKE PASSED` and inspect the simulation log before longer runs.
-
-Separate builds are supported for V100 and H100 nodes:
-
-```bash
-sbatch --gpus=v100:1 cluster/palmetto/smoke.sbatch v100
-sbatch --gpus=h100:1 cluster/palmetto/smoke.sbatch h100
-```
-
-This checkout requires C++20, CMake >=3.22, and CUDA >=12.2. The Palmetto
-scripts use CUDA 12.x to cover all three GPU types. Local script checks
-passed; builds and simulations on Palmetto still need to be validated.
+Each job runs the reference protocol `in.dpd26` for one box on one GPU. The
+first job on a GPU type also builds the GPU executable (20-40 min); jobs that
+start meanwhile wait for it. Step-by-step instructions and notes are in
+[cluster/palmetto/README](cluster/palmetto/README). The build needs C++20,
+CMake >= 3.22 and CUDA 12.2 or newer (12.x for V100 support).
 
 ## Contents
 
@@ -44,11 +28,12 @@ passed; builds and simulations on Palmetto still need to be validated.
 | --- | --- |
 | `lammps26/` | Complete tracked source snapshot of the modified 2026 LAMMPS engine, including bundled Kokkos |
 | `lammps/` | Legacy modified 2018 source directory, retained as a reference |
-| `in.dpd`, `in.dpd26` | Original and modern short simulation protocols |
-| `in.prod26` | Production input with a timestep ramp and replica-dependent seeds |
+| `in.dpd` | The reference script (LAMMPS 2018, CPU) |
+| `in.dpd26` | The same protocol for the 2026 engine and the GPU; only `neighbor 0.3 bin` (was `multi`) and no `comm_modify mode multi` lines differ |
+| `in.prod26` | Optional longer protocol for precise mobility measurements (gentler time-step ramp, fixed seeds); not used by the Palmetto scripts |
 | `data_sim_4x.in` | 288,442-particle starting configuration, approximately 26.5 MB |
-| `cluster/palmetto/` | Portable module setup, build script, and Slurm smoke job |
-| `run_gpu.sh`, `run_prod.sh` | Original workstation launchers; Palmetto users should start with the Slurm script |
+| `cluster/palmetto/` | Palmetto job script `run.sbatch`, module setup `setup.sh`, data checksums `data.sha256` |
+| `run_gpu.sh`, `run_prod.sh` | Workstation launchers (not used on Palmetto) |
 
 `lammps26/` is included as ordinary files, so cloning does not require
 submodule initialization or a separate upstream download. The source includes
@@ -60,14 +45,14 @@ Only `data_sim_4x.in` is included from the project simulation datasets.
 The 8x and 16x datasets, compiled binaries, local build directories, large
 archives, and previous simulation outputs are excluded. Git LFS is not needed.
 
-## Production status
+## Comparing with the original
 
-The short cluster job checks deployment and output creation. Statistical
-validation, longer equilibration, and timing on the target GPU are still
-required before production. The production input currently writes restart
-files after equilibration and after the driven segment; interrupted jobs do
-not automatically resume. Add periodic checkpoints and a continuation input
-before a campaign that could exceed its wall-time allocation.
+GPU runs are not bit-identical to the original CPU code (forces are summed in a
+different order), so compare averages over several runs per box with the
+reference results. With the sphere's rotation frame fixed and the pair noise
+off, the GPU code reproduces the CPU code to about 1e-13 with identical event
+counts in the 4x, 8x and 16x boxes. Full 4x runs (48 GPU and 16 CPU runs) also
+agree statistically.
 
 LAMMPS license and attribution are retained in [lammps26/LICENSE](lammps26/LICENSE),
 its source headers, and [lammps26/CITATION.cff](lammps26/CITATION.cff).

@@ -18,8 +18,8 @@
 /lammps/Makefile.package.settings
 /lammps_modified.zip
 /palmetto-source.tar.gz
-/palmetto-smoke-*.out
-/palmetto-smoke-*.err
+/dpd-*.out
+/_backup*/
 *.o
 *.a
 *.so
